@@ -13217,7 +13217,10 @@ const overlayState = {
 let cartState = {
   items: [],
   store: null,
-  total: 0
+  total: 0,
+  discountedTotal: 0,  // Add this to track discounted total
+  appliedCoupon: null, // Add this to track applied coupon
+  directOrderItems: null
 };
 
 // Function to initialize all overlay event listeners
@@ -15389,7 +15392,6 @@ function renderVariants(variants) {
   `;
 }
 
-// Update the initializeOrderForm function to handle both cart items and direct orders
 function initializeOrderForm() {
   const orderForm = document.getElementById('orderForm');
   if (!orderForm) return;
@@ -15419,24 +15421,18 @@ function initializeOrderForm() {
       });
     }
     
-    // Determine which items to include in the order (cart items or direct order items)
+    // Determine which items to include in the order
     const orderItems = cartState.items.length > 0 ? 
-      cartState.items.map(item => ({
-        name: item.name,
-        variant: item.variant,
-        price: item.price,
-        quantity: item.quantity,
-        total: (item.price * item.quantity).toFixed(2)
-      })) : 
-      (cartState.directOrderItems || []).map(item => ({
-        name: item.name,
-        variant: null,
-        price: item.price,
-        quantity: item.quantity,
-        total: (item.price * item.quantity).toFixed(2)
-      }));
+      cartState.items : 
+      (cartState.directOrderItems || []);
     
-    const orderTotal = orderItems.reduce((sum, item) => sum + parseFloat(item.total), 0).toFixed(2);
+    // Calculate subtotal (before discount)
+    const subtotal = orderItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+    
+    // Use discounted total if coupon was applied, otherwise use regular total
+    const orderTotal = cartState.appliedCoupon ? 
+      cartState.discountedTotal : 
+      subtotal;
     
     // Create order details message
     let orderDetails = `*NEW ORDER NOTIFICATION*\n\n`;
@@ -15457,10 +15453,24 @@ function initializeOrderForm() {
     
     orderDetails += `*Order Items:*\n`;
     orderDetails += orderItems.map(item => 
-      `- ${item.name} ${item.variant ? `(${item.variant})` : ''} × ${item.quantity}: ₹${item.total}`
+      `- ${item.name} ${item.variant ? `(${item.variant})` : ''} × ${item.quantity}: ₹${(item.price * item.quantity).toFixed(2)}`
     ).join('\n');
     
-    orderDetails += `\n\n*Order Total:* ₹${orderTotal}`;
+    // Add discount information if coupon was applied
+    if (cartState.appliedCoupon) {
+      orderDetails += `\n\n*Discount Applied:*\n`;
+      orderDetails += `Coupon Code: ${cartState.appliedCoupon.code}\n`;
+      orderDetails += `Discount: ${(cartState.appliedCoupon.discount * 100)}%\n`;
+      orderDetails += `Discount Amount: -₹${cartState.appliedCoupon.discountAmount.toFixed(2)}\n`;
+    }
+    
+    orderDetails += `\n*Subtotal:* ₹${subtotal.toFixed(2)}`;
+    
+    if (cartState.appliedCoupon) {
+      orderDetails += `\n*Discount:* -₹${cartState.appliedCoupon.discountAmount.toFixed(2)}`;
+    }
+    
+    orderDetails += `\n*Order Total:* ₹${orderTotal.toFixed(2)}`;
     
     // Send order based on store's preferred contact method
     if (cartState.store.details.support.primaryContact === "whatsapp" && cartState.store.details.support.whatsapp) {
@@ -15473,8 +15483,8 @@ function initializeOrderForm() {
       window.location.href = mailtoUrl;
     }
     
-    // Show confirmation
-    showOrderConfirmation(customerName, orderTotal);
+    // Show confirmation with the correct total
+    showOrderConfirmation(customerName, orderTotal.toFixed(2));
     
     // Clear cart/direct order and close form
     clearCart();
@@ -15505,14 +15515,27 @@ function applyCoupon() {
     const discountAmount = cartState.total * coupon.discount;
     const newTotal = cartState.total - discountAmount;
     
+    // Update cart state with discount information
+    cartState.discountedTotal = newTotal;
+    cartState.appliedCoupon = {
+      code: couponCode,
+      discount: coupon.discount,
+      discountAmount: discountAmount
+    };
+    
     // Update UI
     couponMessage.textContent = coupon.message;
     couponMessage.className = 'coupon-message success';
     
+    // Update both cart total and order total displays
+    document.getElementById('cartTotalAmount').textContent = `₹${newTotal.toFixed(2)}`;
     document.getElementById('orderTotal').textContent = `₹${newTotal.toFixed(2)}`;
   } else {
     couponMessage.textContent = 'Invalid coupon code';
     couponMessage.className = 'coupon-message error';
+    // Reset discount if invalid coupon
+    cartState.discountedTotal = cartState.total;
+    cartState.appliedCoupon = null;
   }
 }
 
@@ -15675,13 +15698,24 @@ function updateQuantity(index, change) {
 
 function clearCart() {
   cartState.items = [];
-  updateCartTotal();
+  cartState.total = 0;
+  cartState.discountedTotal = 0;
+  cartState.appliedCoupon = null;
   updateCartUI();
   hideCart();
 }
 
 function updateCartTotal() {
   cartState.total = cartState.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+  
+  // Reapply coupon discount if one was applied
+  if (cartState.appliedCoupon) {
+    const discountAmount = cartState.total * cartState.appliedCoupon.discount;
+    cartState.discountedTotal = cartState.total - discountAmount;
+    cartState.appliedCoupon.discountAmount = discountAmount;
+  } else {
+    cartState.discountedTotal = cartState.total;
+  }
 }
 
 function updateCartUI() {
@@ -15694,10 +15728,11 @@ function updateCartUI() {
     cartItemsContainer.innerHTML = renderCartItems();
   }
   
-  // Update cart total
+  // Update cart total (show discounted total if available)
   const cartTotalElement = document.getElementById('cartTotalAmount');
   if (cartTotalElement) {
-    cartTotalElement.textContent = `₹${cartState.total.toFixed(2)}`;
+    const displayTotal = cartState.appliedCoupon ? cartState.discountedTotal : cartState.total;
+    cartTotalElement.textContent = `₹${displayTotal.toFixed(2)}`;
   }
   
   // Update cart count in header
@@ -15725,7 +15760,8 @@ function updateCartUI() {
   
   if (orderSummaryItems && orderTotal) {
     orderSummaryItems.innerHTML = renderOrderSummaryItems();
-    orderTotal.textContent = `₹${cartState.total.toFixed(2)}`;
+    const displayTotal = cartState.appliedCoupon ? cartState.discountedTotal : cartState.total;
+    orderTotal.textContent = `₹${displayTotal.toFixed(2)}`;
   }
 }
 
@@ -24533,12 +24569,12 @@ function addProviderPageStyles() {
 
 .close-confirmation {
   background: #f5f5f5;
-  color: #333;
+  color: #fff;
   border: none;
 }
 
 .close-confirmation:hover {
-  background: #e0e0e0;
+  background: #fff;
 }
 
 /* Toast notification */
