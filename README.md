@@ -21292,11 +21292,14 @@ const serviceProvidersData = [
 ];
 
 // Global booking state
+// Global booking state
 let bookingState = {
   items: [],
   provider: null,
   total: 0,
-  directBookingItems: null
+  discountedTotal: 0,  // Add this line
+  directBookingItems: null,
+  appliedCoupon: null  // Add this to track applied coupon
 };
 
 function showProvidersOverlay() {
@@ -22964,7 +22967,9 @@ function updateBookingQuantity(index, change) {
 
 function clearBookingCart() {
   bookingState.items = [];
-  updateBookingTotal();
+  bookingState.total = 0;
+  bookingState.discountedTotal = 0;
+  bookingState.appliedCoupon = null;
   updateBookingCartUI();
   hideBookingCart();
 }
@@ -23018,7 +23023,6 @@ function updateBookingCartUI() {
   }
 }
 
-// Booking Form Functions
 function initializeBookingForm() {
   const bookingForm = document.getElementById('bookingForm');
   if (!bookingForm) return;
@@ -23064,7 +23068,10 @@ function initializeBookingForm() {
         total: (item.price * item.quantity).toFixed(2)
       }));
     
-    const bookingTotal = bookingItems.reduce((sum, item) => sum + parseFloat(item.total), 0).toFixed(2);
+    // Use discounted total if coupon was applied, otherwise use regular total
+    const bookingTotal = bookingState.appliedCoupon ? 
+      bookingState.discountedTotal : 
+      bookingItems.reduce((sum, item) => sum + parseFloat(item.total), 0);
     
     // Create booking details message
     let bookingDetails = `*NEW SERVICE BOOKING*\n\n`;
@@ -23088,7 +23095,21 @@ function initializeBookingForm() {
       `- ${item.name} ${item.variant ? `(${item.variant})` : ''} × ${item.quantity}: ₹${item.total}`
     ).join('\n');
     
-    bookingDetails += `\n\n*Booking Total:* ₹${bookingTotal}`;
+    // Add coupon information if applied
+    if (bookingState.appliedCoupon) {
+      bookingDetails += `\n\n*Discount Applied:*\n`;
+      bookingDetails += `Coupon Code: ${bookingState.appliedCoupon.code}\n`;
+      bookingDetails += `Discount: ${(bookingState.appliedCoupon.discount * 100)}%\n`;
+      bookingDetails += `Discount Amount: ₹${bookingState.appliedCoupon.discountAmount.toFixed(2)}\n`;
+    }
+    
+    bookingDetails += `\n\n*Subtotal:* ₹${bookingItems.reduce((sum, item) => sum + parseFloat(item.total), 0).toFixed(2)}`;
+    
+    if (bookingState.appliedCoupon) {
+      bookingDetails += `\n*Discount:* -₹${bookingState.appliedCoupon.discountAmount.toFixed(2)}`;
+    }
+    
+    bookingDetails += `\n*Booking Total:* ₹${bookingTotal.toFixed(2)}`;
     
     // Send booking based on provider's preferred contact method
     if (bookingState.provider.details.support.primaryContact === "whatsapp" && bookingState.provider.details.support.whatsapp) {
@@ -23102,7 +23123,7 @@ function initializeBookingForm() {
     }
     
     // Show confirmation
-    showBookingConfirmation(customerName, bookingTotal);
+    showBookingConfirmation(customerName, bookingTotal.toFixed(2));
     
     // Clear booking cart/direct booking and close form
     clearBookingCart();
@@ -23133,6 +23154,14 @@ function applyBookingCoupon() {
     const discountAmount = bookingState.total * coupon.discount;
     const newTotal = bookingState.total - discountAmount;
     
+    // Update booking state
+    bookingState.discountedTotal = newTotal;
+    bookingState.appliedCoupon = {
+      code: couponCode,
+      discount: coupon.discount,
+      discountAmount: discountAmount
+    };
+    
     // Update UI
     couponMessage.textContent = coupon.message;
     couponMessage.className = 'coupon-message success';
@@ -23141,6 +23170,8 @@ function applyBookingCoupon() {
   } else {
     couponMessage.textContent = 'Invalid coupon code';
     couponMessage.className = 'coupon-message error';
+    bookingState.discountedTotal = bookingState.total;
+    bookingState.appliedCoupon = null;
   }
 }
 
